@@ -1,414 +1,215 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<title>부서진 도형 복원기 (Bezier + Circle Fit)</title>
+<meta charset="UTF-8">
+<title>Dinosaur Stat Viewer</title>
 <style>
-  :root { --w:1080px; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; margin: 20px; }
-  h1 { margin: 0 0 8px; }
-  p  { margin: 6px 0 10px; color:#333; }
-  .row { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
-  canvas { width: var(--w); height: 600px; border:1px solid #ddd; background:#fff; }
-  button { margin:4px 4px 0 0; }
-  input[type="range"] { width:100%; }
-  .hint { color:#666; font-size:12px; }
-  #log { font-size:12px; white-space:pre-wrap; background:#fff; border:1px solid #eee; padding:8px; height:160px; overflow:auto;}
+    body {
+        background: #111;
+        color: #fff;
+        font-family: Arial, sans-serif;
+        padding: 20px;
+    }
+    h1, h2 {
+        margin-bottom: 8px;
+    }
+    input, button {
+        padding: 8px;
+        margin: 5px 3px 5px 0;
+        font-size: 16px;
+    }
+    #output {
+        margin-top: 20px;
+        padding: 15px;
+        background: #222;
+        white-space: pre-line;
+        border-radius: 10px;
+    }
 </style>
 </head>
 <body>
 
-<h1>부서진 곡선 복원기 (Bezier + Circle Fit)</h1>
-<p class="hint">조각난 선을 그리면 전체 곡선을 자동으로 복원합니다. 반원 일부만 있어도 원으로 복원됩니다.</p>
+<h1>Dinosaur Stat Viewer</h1>
 
-<div class="row">
-  <div>
-    <canvas id="cv" width="1080" height="600"></canvas>
-    <div style="margin-top:8px;">
-      <button id="modeOpen">그리기: 폴리라인</button>
-      <button id="modeClosed">그리기: 폴리곤</button>
-      <button id="finishContour">현재 윤곽 종료</button>
-      <button id="undoPoint">마지막 점 취소</button>
-      <button id="clearAll">모두 지우기</button>
-    </div>
-  </div>
+<h2>Search Dinosaur</h2>
+<input id="searchInput" placeholder="공룡 이름 입력 (예: giga, allo)">
+<button onclick="searchDino()">Search</button>
 
-  <div>
-    <h2>입출력</h2>
-    <input id="svgfile" type="file" accept=".svg">
-    <button id="loadSvg">SVG 불러오기</button><br><br>
+<h2>Compare Dinosaurs</h2>
+<input id="aInput" placeholder="Dino 1">
+<input id="bInput" placeholder="Dino 2">
+<button onclick="compareDino()">Compare</button>
 
-    <input id="jsonfile" type="file" accept=".json">
-    <button id="loadJson">JSON 불러오기</button><br><br>
-
-    <button id="exportSvg">SVG 저장</button>
-    <button id="exportJson">JSON 저장</button>
-
-    <h2>옵션</h2>
-    <label>스무딩(0~1): <span id="smoothVal">0.6</span></label>
-    <input id="smooth" type="range" min="0" max="1" step="0.05" value="0.6">
-
-    <h2>복원</h2>
-    <button id="heal">복원 실행</button>
-
-    <h2>로그</h2>
-    <div id="log">대기중…</div>
-  </div>
-</div>
+<div id="output"></div>
 
 <script>
-// =======================================================
-// 상태
-// =======================================================
-const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
-const logEl=document.getElementById('log');
-function log(t){ logEl.textContent += "\n" + t; logEl.scrollTop=logEl.scrollHeight; }
-function clearLog(){ logEl.textContent=""; }
+// ------------------------- Dino Data -----------------------------
 
-const state={
-  mode:'open',
-  current:[],
-  openPolylines:[],
-  closedContours:[],
-  bezierResult: null
+const dinoDB = {
+"Tyrannosaurus":     {damage:1200,health:6500,speed:33.2,ambush:43.1,sprint:33,bleed:10,grow:380,index:1},
+"T-rex":             {damage:1200,health:6500,speed:33.2,ambush:43.1,sprint:33,bleed:10,grow:380,index:1},
+"Giganotosaurus":    {damage:700,health:6000,speed:30.6,ambush:39.8,sprint:50,bleed:40,grow:390,index:2},
+"Albertosaurus":     {damage:424,health:3000,speed:39.2,ambush:42.1,sprint:0,bleed:10,grow:120,index:3},
+"Suchomimus":        {damage:350,health:3600,speed:30.9,ambush:39.3,sprint:200,bleed:20,grow:235,index:4},
+"Ceratosaurus":      {damage:350,health:2250,speed:36.6,ambush:40.3,sprint:150,bleed:8,grow:150,index:5},
+"Allosaurus":        {damage:300,health:2800,speed:34.2,ambush:44.5,sprint:200,bleed:25,grow:180,index:6},
+"Spinosaurus":       {damage:250,health:9071,speed:23.3,ambush:34.4,sprint:30,bleed:18,grow:360,index:7},
+"Acrocanthosaurus":  {damage:250,health:4790,speed:42.6,ambush:52.2,sprint:27,bleed:25,grow:240,index:8},
+"Carnotaurus":       {damage:200,health:2170,speed:52.2,ambush:0,sprint:220,bleed:15,grow:110,index:9},
+"Utahraptor":        {damage:200,health:1200,speed:43.2,ambush:56,sprint:300,bleed:20,grow:100,index:10},
+"Baryonyx":          {damage:150,health:1450,speed:41.3,ambush:49.6,sprint:155,bleed:15,grow:180,index:11},
+"Dilophosaurus":     {damage:150,health:1050,speed:38.8,ambush:45.5,sprint:150,bleed:50,grow:110,index:12},
+"Austroraptor":      {damage:60,health:250,speed:51.5,ambush:0,sprint:120,bleed:2,grow:120,index:13},
+"Herrerasaurus":     {damage:50,health:500,speed:55.8,ambush:0,sprint:130,bleed:10,grow:80,index:14},
+"Puertasaurus":      {damage:5000,health:49895,speed:0,ambush:0,sprint:0,bleed:0,grow:0,index:15},
+"Ankylosaurus":      {damage:1260,health:5443,speed:19.3,ambush:0,sprint:120,bleed:30,grow:240,index:16},
+"Stegosaurus":       {damage:1200,health:4883,speed:26.3,ambush:0,sprint:90,bleed:30,grow:240,index:17},
+"Camarasaurus":      {damage:750,health:12000,speed:20.7,ambush:0,sprint:70,bleed:0,grow:0,index:18},
+"Triceratops":       {damage:360,health:8200,speed:25.34,ambush:0,sprint:66,bleed:20,grow:360,index:19},
+"Therizinosaurus":   {damage:350,health:4536,speed:38.2,ambush:0,sprint:65,bleed:30,grow:300,index:20},
+"Pachycephalosaurus":{damage:350,health:1300,speed:40,ambush:0,sprint:175,bleed:10,grow:130,index:21},
+"Diabloceratops":    {damage:350,health:3250,speed:31.6,ambush:0,sprint:150,bleed:18,grow:180,index:22},
+"Shantungosaurus":   {damage:250,health:11793,speed:32.5,ambush:0,sprint:46,bleed:14,grow:360,index:23},
+"Parasaurolophus":   {damage:250,health:3600,speed:34.2,ambush:0,sprint:250,bleed:20,grow:180,index:24},
+"Maiasaura":         {damage:175,health:2868,speed:44.6,ambush:0,sprint:180,bleed:14,grow:110,index:25},
+"Gallimimus":        {damage:150,health:800,speed:48.6,ambush:0,sprint:400,bleed:18,grow:90,index:26},
+"Dryosaurus":        {damage:20,health:500,speed:41.5,ambush:0,sprint:250,bleed:30,grow:120,index:27}
 };
 
-// =======================================================
-// 기본 함수
-// =======================================================
-function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
-function ensureClosed(ct){
-  const f=ct[0], l=ct[ct.length-1];
-  if(f.x!==l.x||f.y!==l.y) ct.push({x:f.x,y:f.y});
+// ----------------- Hit Table (27x27) -------------------
+
+const dino_deal = [
+    [6, 6, 2, 2, 1, 2, 12, 4, 1, 1, 1, 1, 1, 1, 0, 5, 4, 20, 10, 3, 1, 2, 19, 2, 2, 1, 1],
+    [9, 9, 2, 3, 2, 2, 18, 6, 2, 1, 1, 1, 1, 1, 0, 7, 6, 31, 15, 5, 1, 3, 30, 3, 2, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [17, 17, 4, 6, 3, 4, 35, 10, 4, 1, 1, 1, 1, 1, 1, 13, 11, 61, 29, 9, 1, 5, 59, 6, 4, 1, 1],
+    [31, 31, 8, 11, 5, 7, 63, 19, 4, 1, 2, 2, 2, 1, 1, 24, 19, 110, 53, 17, 2, 9, 106, 11, 7, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+];
+
+// ----------------------- Util Functions -------------------------
+
+function lower(s){ return s.toLowerCase(); }
+
+// C++ Search 함수와 동일한 부분 문자열 검색
+function searchName(input){
+    const key = lower(input);
+    for(const name in dinoDB){
+        if(lower(name).includes(key)) return name;
+    }
+    return null;
 }
 
-// =======================================================
-// 원 피팅(Kasa)
-// =======================================================
-function fitCircle(points){
-  let sumX=0,sumY=0,sumX2=0,sumY2=0,sumXY=0;
-  const n=points.length;
-  for(const p of points){
-    sumX+=p.x; sumY+=p.y;
-    sumX2+=p.x*p.x; sumY2+=p.y*p.y;
-    sumXY+=p.x*p.y;
-  }
-  const A=n*sumX2 - sumX*sumX;
-  const B=n*sumXY - sumX*sumY;
-  const C=n*(sumX2+sumY2)-(sumX*sumX + sumY*sumY);
-  const denom=2*(A*(n*sumY2 - sumY*sumY) - B*B);
-  if(Math.abs(denom)<1e-9) return null;
-
-  const cy=(A*(n*sumY2 - sumY*sumY) - B*(n*sumXY - sumX*sumY))/denom;
-  const cx=(sumX - sumY*cy)/A * 0.5;
-  const r=Math.hypot(points[0].x-cx, points[0].y-cy);
-  return {cx,cy,r};
-}
-
-// =======================================================
-// Bezier spline (Catmull-Rom → cubic Bezier)
-// =======================================================
-function splineToBezier(pts, alpha=0.5){
-  if(pts.length<2) return [];
-  const out=[];
-  out.push({type:"M", x:pts[0].x, y:pts[0].y});
-  const n=pts.length;
-
-  function P(i){
-    if(i<0) return pts[0];
-    if(i>=n) return pts[n-1];
-    return pts[i];
-  }
-
-  for(let i=0;i<n-1;i++){
-    const p0=P(i-1), p1=P(i), p2=P(i+1), p3=P(i+2);
-    const t=alpha/6;
-    const cp1={x:p1.x+(p2.x-p0.x)*t, y:p1.y+(p2.y-p0.y)*t};
-    const cp2={x:p2.x-(p3.x-p1.x)*t, y:p2.y-(p3.y-p1.y)*t};
-    out.push({
-      type:"C",
-      x1:cp1.x,y1:cp1.y,
-      x2:cp2.x,y2:cp2.y,
-      x:p2.x, y:p2.y
-    });
-  }
-  return out;
-}
-
-// =======================================================
-// 원호 → Bezier
-// =======================================================
-function arcSegmentToBezier(cx,cy,r,a0,a1){
-  const cos=Math.cos, sin=Math.sin;
-  const p0={x:cx+r*cos(a0), y:cy+r*sin(a0)};
-  const p3={x:cx+r*cos(a1), y:cy+r*sin(a1)};
-  const t=Math.tan((a1-a0)/4);
-  const hx=r*t;
-
-  const cp1={x:p0.x - hx*sin(a0), y:p0.y + hx*cos(a0)};
-  const cp2={x:p3.x + hx*sin(a1), y:p3.y - hx*cos(a1)};
-  return {p0, cp1, cp2, p3};
-}
-
-function arcToBeziers(cx,cy,r,a0,a1){
-  const sweep=a1-a0;
-  const parts=Math.ceil(Math.abs(sweep)/(Math.PI/2));
-  const step=sweep/parts;
-  const segs=[];
-  for(let i=0;i<parts;i++){
-    const t0=a0+step*i;
-    const t1=a0+step*(i+1);
-    segs.push(arcSegmentToBezier(cx,cy,r,t0,t1));
-  }
-  return segs;
-}
-
-// =======================================================
-// ★ “곡률 기반 복원” 핵심 함수 (전체 교체됨)
-// =======================================================
-function healBrokenShape({closedContours=[],openPolylines=[]}, opts){
-  // 0) 모든 점을 하나로 통합
-  const pts=[];
-  for(const ct of closedContours) for(const p of ct) pts.push({...p});
-  for(const ln of openPolylines) for(const p of ln) pts.push({...p});
-  if(pts.length<3) return [];
-
-  // 1) 정렬 (대략적인 순서 추정)
-  pts.sort((a,b)=>a.x===b.x ? a.y-b.y : a.x-b.x);
-
-  // 2) 곡률 분석
-  const diffs=[];
-  for(let i=1;i<pts.length-1;i++){
-    const a=pts[i-1], b=pts[i], c=pts[i+1];
-    const ang=Math.abs(
-      Math.atan2(c.y-b.y,c.x-b.x) - Math.atan2(b.y-a.y,b.x-a.x)
+function printStat(name, d){
+    return (
+`=== ${name} ===
+Damage: ${d.damage}
+Health: ${d.health}
+Speed: ${d.speed}
+Ambush: ${d.ambush}
+Sprint_Duration: ${d.sprint}
+Bleed: ${d.bleed}
+Grow time: ${d.grow}`
     );
-    diffs.push(ang);
-  }
-  const meanAng=diffs.reduce((s,v)=>s+v,0)/diffs.length;
-  const looksLikeArc = meanAng > 0.1;
-
-  let bezierPaths=[];
-
-  // 3) 원인지 판단
-  if(looksLikeArc){
-    const fit=fitCircle(pts);
-    if(fit){
-      let a0=Math.atan2(pts[0].y-fit.cy, pts[0].x-fit.cx);
-      let a1=Math.atan2(pts[pts.length-1].y-fit.cy, pts[pts.length-1].x-fit.cx);
-
-      const segs=arcToBeziers(fit.cx,fit.cy,fit.r,a0,a1);
-      const path=[{type:"M", x:segs[0].p0.x, y:segs[0].p0.y}];
-      for(const sg of segs){
-        path.push({
-          type:"C",
-          x1:sg.cp1.x, y1:sg.cp1.y,
-          x2:sg.cp2.x, y2:sg.cp2.y,
-          x:sg.p3.x,   y:sg.p3.y
-        });
-      }
-      bezierPaths.push(path);
-    } else {
-      bezierPaths.push(splineToBezier(pts, Number(smooth.value)));
-    }
-  } else {
-    bezierPaths.push(splineToBezier(pts, Number(smooth.value)));
-  }
-
-  return bezierPaths;
 }
 
-// =======================================================
-// Canvas 렌더링 (Bezier)
-// =======================================================
-function draw(){
-  ctx.clearRect(0,0,cv.width,cv.height);
+// ------------------------ Search ----------------------------
 
-  // 원본 점/선
-  ctx.strokeStyle="#aaa"; ctx.lineWidth=1.2;
-  for(const ct of state.closedContours){
-    ctx.beginPath();
-    for(let i=0;i<ct.length;i++){
-      if(i===0) ctx.moveTo(ct[i].x, ct[i].y);
-      else ctx.lineTo(ct[i].x, ct[i].y);
+function searchDino(){
+    const input = document.getElementById("searchInput").value.trim();
+    let name = input;
+
+    if (!name){
+        document.getElementById("output").innerText = "NOT FOUND";
+        return;
     }
-    ctx.stroke();
-  }
-  for(const ln of state.openPolylines){
-    ctx.beginPath();
-    for(let i=0;i<ln.length;i++){
-      if(i===0) ctx.moveTo(ln[i].x, ln[i].y);
-      else ctx.lineTo(ln[i].x, ln[i].y);
+
+    if(!dinoDB[name]) name = searchName(input);
+    if(!name || !dinoDB[name]){
+        document.getElementById("output").innerText = "NOT FOUND";
+        return;
     }
-    ctx.stroke();
-  }
 
-  // 현재 입력 중 점
-  if(state.current.length){
-    ctx.strokeStyle="#000"; ctx.setLineDash([5,3]);
-    ctx.beginPath();
-    for(let i=0;i<state.current.length;i++){
-      const p=state.current[i];
-      if(i===0) ctx.moveTo(p.x,p.y);
-      else ctx.lineTo(p.x,p.y);
-    }
-    ctx.stroke(); ctx.setLineDash([]);
-
-    ctx.fillStyle="#000";
-    for(const p of state.current){
-      ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2);
-      ctx.fill();
-    }
-  }
-
-  // 베지에 복원 결과
-  if(state.bezierResult){
-    ctx.strokeStyle="#ff4b00"; ctx.lineWidth=2.0;
-    for(const path of state.bezierResult){
-      ctx.beginPath();
-      for(const cmd of path){
-        if(cmd.type==="M") ctx.moveTo(cmd.x,cmd.y);
-        else if(cmd.type==="C") ctx.bezierCurveTo(cmd.x1,cmd.y1,cmd.x2,cmd.y2,cmd.x,cmd.y);
-      }
-      ctx.stroke();
-    }
-  }
-}
-draw();
-
-// =======================================================
-// Canvas 클릭 → 점 입력
-// =======================================================
-cv.addEventListener('click', e=>{
-  const r=cv.getBoundingClientRect();
-  const x=e.clientX-r.left, y=e.clientY-r.top;
-  state.current.push({x,y});
-  draw();
-});
-
-// =======================================================
-// 버튼 동작
-// =======================================================
-document.getElementById('modeOpen').onclick=()=>state.mode='open';
-document.getElementById('modeClosed').onclick=()=>state.mode='closed';
-
-document.getElementById('undoPoint').onclick=()=>{
-  state.current.pop(); draw();
-};
-
-document.getElementById('clearAll').onclick=()=>{
-  state.current=[]; state.openPolylines=[]; state.closedContours=[];
-  state.bezierResult=null; clearLog(); draw();
-};
-
-document.getElementById('finishContour').onclick=()=>{
-  if(state.current.length<2) return;
-  const ct=state.current.slice();
-  if(state.mode==='closed') ensureClosed(ct);
-  if(state.mode==='closed') state.closedContours.push(ct);
-  else state.openPolylines.push(ct);
-  state.current=[]; draw();
-};
-
-// =======================================================
-// 복원 실행
-// =======================================================
-const smooth=document.getElementById('smooth');
-document.getElementById('heal').onclick=()=>{
-  const res = healBrokenShape({
-    closedContours:state.closedContours,
-    openPolylines:state.openPolylines
-  });
-  state.bezierResult=res;
-  draw();
-  log("곡선 복원 완료: 베지에 경로 "+res.length+"개");
-};
-
-// =======================================================
-// SVG / JSON 내보내기
-// =======================================================
-function download(name, blob){
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download=name; a.click();
-  setTimeout(()=>URL.revokeObjectURL(url),100);
+    document.getElementById("output").innerText = printStat(name, dinoDB[name]);
 }
 
-document.getElementById('exportSvg').onclick=()=>{
-  if(!state.bezierResult){ log("복원된 결과 없음"); return;}
+// ------------------------ Compare ----------------------------
 
-  function toD(path){
-    const out=[];
-    for(const c of path){
-      if(c.type==="M") out.push(`M${c.x} ${c.y}`);
-      else out.push(`C${c.x1} ${c.y1} ${c.x2} ${c.y2} ${c.x} ${c.y}`);
-    }
-    return out.join(" ");
-  }
+function compareDino(){
+    const aRaw = document.getElementById("aInput").value.trim();
+    const bRaw = document.getElementById("bInput").value.trim();
 
-  const d = state.bezierResult.map(toD).join(" ");
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${cv.width} ${cv.height}">
-  <path d="${d}" fill="none" stroke="black"/>
-</svg>`;
-  download("healed.svg", new Blob([svg],{type:"image/svg+xml"}));
-  log("SVG 저장 완료");
-};
+    let a = aRaw;
+    let b = bRaw;
 
-document.getElementById('exportJson').onclick=()=>{
-  const data=JSON.stringify({bezier:state.bezierResult},null,2);
-  download("healed.json", new Blob([data],{type:"application/json"}));
-  log("JSON 저장 완료");
-};
-
-// =======================================================
-// SVG/JSON 불러오기 (polyline/polygon만)
-// =======================================================
-document.getElementById('loadSvg').onclick=async()=>{
-  const f=document.getElementById('svgfile').files[0];
-  if(!f){ log("파일 선택 없음"); return; }
-  const txt=await f.text();
-  try{
-    const dom=new DOMParser().parseFromString(txt,"image/svg+xml");
-    const polys=[...dom.querySelectorAll('polygon')];
-    const lines=[...dom.querySelectorAll('polyline')];
-    let cc=[], oo=[];
-
-    function parsePoints(ps){
-      const nums=ps.trim().split(/[ ,]+/).map(Number).filter(n=>isFinite(n));
-      const arr=[];
-      for(let i=0;i<nums.length;i+=2)
-        arr.push({x:nums[i], y:nums[i+1]});
-      return arr;
+    if (!a || !b){
+        document.getElementById("output").innerText = "NOT FOUND";
+        return;
     }
 
-    for(const p of polys){
-      const arr=parsePoints(p.getAttribute('points')||'');
-      if(arr.length>2){ ensureClosed(arr); cc.push(arr); }
+    if(!dinoDB[a]){
+        const p = searchName(a);
+        if(p) a = p;
     }
-    for(const p of lines){
-      const arr=parsePoints(p.getAttribute('points')||'');
-      if(arr.length>1) oo.push(arr);
+    if(!dinoDB[b]){
+        const p = searchName(b);
+        if(p) b = p;
     }
 
-    state.current=[]; state.openPolylines=oo; state.closedContours=cc;
-    state.bezierResult=null; draw();
-    log("SVG 불러오기 완료");
-  }catch(e){
-    log("SVG 파싱 실패: "+e.message);
-  }
-};
+    if(!dinoDB[a] || !dinoDB[b]){
+        document.getElementById("output").innerText = "NOT FOUND";
+        return;
+    }
 
-document.getElementById('loadJson').onclick=async()=>{
-  const f=document.getElementById('jsonfile').files[0];
-  if(!f){ log("파일 선택 없음"); return; }
-  const obj=JSON.parse(await f.text());
-  state.bezierResult=null;
-  state.openPolylines=(obj.openPolylines||[]);
-  state.closedContours=(obj.closedContours||[]);
-  draw();
-  log("JSON 불러오기 완료");
-};
+    const Aname = a;
+    const Bname = b;
+    const A = dinoDB[Aname];
+    const B = dinoDB[Bname];
+
+    let txt = "";
+    txt += `=== Result (${Aname} vs ${Bname}) ===\n`;
+
+    function cmp(label, x, y){
+        txt += `${label}:  ${Aname}(${x})  vs  ${Bname}(${y})  → `;
+        if (x > y) txt += `${Aname} 우세\n`;
+        else if (x < y) txt += `${Bname} 우세\n`;
+        else txt += `동일\n`;
+    }
+
+    cmp("Damage", A.damage, B.damage);
+    cmp("Health", A.health, B.health);
+    cmp("Speed", A.speed, B.speed);
+    cmp("Ambush", A.ambush, B.ambush);
+    cmp("Sprint", A.sprint, B.sprint);
+    cmp("Bleed", A.bleed, B.bleed);
+
+    const idxA = A.index - 1;
+    const idxB = B.index - 1;
+
+    txt += `\n${Aname} hit ${Bname} ${dino_deal[idxA][idxB]} times\n`;
+    txt += `${Bname} hit ${Aname} ${dino_deal[idxB][idxA]} times\n`;
+
+    document.getElementById("output").innerText = txt;
+}
 </script>
-
 </body>
 </html>
